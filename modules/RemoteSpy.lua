@@ -23,6 +23,7 @@ local remoteMethods = {
 
 local remotesViewing = {
     RemoteEvent = true,
+    UnreliableRemoteEvent = false,
     RemoteFunction = false,
     BindableEvent = false,
     BindableFunction = false
@@ -30,6 +31,7 @@ local remotesViewing = {
 
 local methodHooks = {
     RemoteEvent = Instance.new("RemoteEvent").FireServer,
+    UnreliableRemoteEvent = Instance.new("UnreliableRemoteEvent").FireServer,
     RemoteFunction = Instance.new("RemoteFunction").InvokeServer,
     BindableEvent = Instance.new("BindableEvent").Fire,
     BindableFunction = Instance.new("BindableFunction").Invoke
