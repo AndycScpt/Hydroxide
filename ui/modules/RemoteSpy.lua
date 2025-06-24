@@ -321,7 +321,8 @@ function Log.new(remote)
                 MessageBox.Show("Warning",
                     "This remote seems to have a lot of calls, opening this may cause your game to freeze for a few seconds.\n\nContinue?",
                     MessageType.YesNo,
-                    viewLogs)
+                    viewLogs,
+                    nil)
             else
                 viewLogs()
             end
