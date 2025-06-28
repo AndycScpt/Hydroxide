@@ -53,10 +53,10 @@ end
 local nmcTrampoline
 nmcTrampoline = hookMetaMethod(game, "__namecall", function(...)
 
-    local success = pcall(nmcTrampoline, ...)
+    --[[local success = pcall(nmcTrampoline, ...)
     if not success then
         return 'missing argument #1 (Instance expected)'
-    end
+    end]]
         
     local instance = ...
     
