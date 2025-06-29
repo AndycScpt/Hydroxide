@@ -3,6 +3,7 @@ local TweenService = game:GetService("TweenService")
 
 local RemoteSpy = {}
 local Methods = import("modules/RemoteSpy")
+local StringMethods = import("methods/string")
 local ClosureSpy = import("modules/ClosureSpy")
 local Closure = import("objects/Closure")
 
@@ -64,7 +65,8 @@ local icons = {
     RemoteFunction = "rbxassetid://4229810474",
     BindableEvent = "rbxassetid://4229809371",
     BindableFunction = "rbxassetid://4229807624",
-    UnreliableRemoteEvent = "rbxassetid://116756718965593"
+    UnreliableRemoteEvent = "rbxassetid://116756718965593",
+    buffer = "rbxassetid://4842578510"
 }
 
 local constants = {
@@ -103,7 +105,8 @@ local scriptContext = ContextMenuButton.new("rbxassetid://4800244808", "Generate
 local callingScriptContext = ContextMenuButton.new("rbxassetid://4800244808", "Get Calling Script")
 local spyClosureContext = ContextMenuButton.new("rbxassetid://4666593447", "Spy Calling Function")
 local repeatCallContext = ContextMenuButton.new("rbxassetid://4907151581", "Repeat Call")
-local viewAsHexContext = ContextMenuButton.new("rbxassetid://9058292613", "Toggle String Hex View")
+local viewAsHexContext = ContextMenuButton.new("rbxassetid://9058292613", "Toggle Hex View")
+
 
 local removeConditionContext = ContextMenuButton.new("rbxassetid://4702831188", "Remove Condition")
 
@@ -236,11 +239,12 @@ local function createConditions(remote)
 
     local remoteInstance = remote.Instance
     local remoteInstanceName = remoteInstance.Name
+    local cleanRemoteName = StringMethods.cleanRemoteName(remoteInstanceName)
     local remoteClassName = remoteInstance.ClassName
-    local nameLength = TextService:GetTextSize(remoteInstanceName, 18, "SourceSans", constants.textWidth).X + 20
+    local nameLength = TextService:GetTextSize(cleanRemoteName, 18, "SourceSans", constants.textWidth).X + 20
 
     ConditionsRemote.Icon.Image = icons[remoteClassName]
-    ConditionsRemote.Label.Text = remoteInstanceName
+    ConditionsRemote.Label.Text = cleanRemoteName
     ConditionsRemote.Label.Size = UDim2.new(0, nameLength, 0, 20)
     ConditionsRemote.Position = UDim2.new(1, -nameLength, 0, 0)
 
@@ -280,6 +284,7 @@ function Log.new(remote)
     local button = Assets.RemoteLog:Clone()
     local remoteInstance = remote.Instance
     local remoteInstanceName = remoteInstance.Name
+    local cleanRemoteName = StringMethods.cleanRemoteName(remoteInstanceName)
     local remoteClassName = remoteInstance.ClassName
     local listButton = ListButton.new(button, remoteList)
     
@@ -287,8 +292,8 @@ function Log.new(remote)
     local blockAnimation = TweenService:Create(button.Label, constants.fadeLength, { TextColor3 = constants.blockedColor })
     local ignoreAnimation = TweenService:Create(button.Label, constants.fadeLength, { TextColor3 = constants.ignoredColor })
 
-    button.Name = remoteInstanceName
-    button.Label.Text = remoteInstanceName
+    button.Name = cleanRemoteName
+    button.Label.Text = cleanRemoteName
     button.Icon.Image = icons[remoteClassName]
 
     local function viewLogs()
@@ -296,7 +301,7 @@ function Log.new(remote)
             remoteLogs:Clear()
         end
         
-        local nameLength = TextService:GetTextSize(remoteInstanceName, 18, "SourceSans", constants.textWidth).X + 20
+        local nameLength = TextService:GetTextSize(cleanRemoteName, 18, "SourceSans", constants.textWidth).X + 20
         
         selected.remoteLog = log
 
@@ -308,7 +313,7 @@ function Log.new(remote)
         checkCurrentIgnored()
 
         LogsRemote.Icon.Image = icons[remoteClassName]
-        LogsRemote.Label.Text = remoteInstanceName
+        LogsRemote.Label.Text = cleanRemoteName
         LogsRemote.Label.Size = UDim2.new(0, nameLength, 0, 20)
         LogsRemote.Position = UDim2.new(1, -nameLength, 0, 0)
 
@@ -369,17 +374,26 @@ end
 local function createArg(instance, index, value)
     local arg = Assets.RemoteArg:Clone()
     local valueType = type(value)
+    local robloxValueType = typeof(value)
 
-    arg.Icon.Image = oh.Constants.Types[valueType]
-    arg.Index.Text = index
-    
-    if valueType == "table" then
-        arg.Label.Text = toString(value)
+    -- Handle buffer type properly
+    if robloxValueType == "buffer" then
+        arg.Icon.Image = oh.Constants.Types["buffer"] or oh.Constants.Types["userdata"] or oh.Constants.Types[valueType] or icons.buffer
+        arg.Label.Text = StringMethods.toString(value)
+        arg.Label.TextColor3 = oh.Constants.Syntax["buffer"] or oh.Constants.Syntax["userdata"] or oh.Constants.Syntax[valueType] or Color3.fromRGB(255, 255, 255)
     else
-        arg.Label.Text = dataToString(value)
+        arg.Icon.Image = oh.Constants.Types[robloxValueType] or oh.Constants.Types[valueType]
+        
+        if valueType == "table" then
+            arg.Label.Text = toString(value)
+        else
+            arg.Label.Text = dataToString(value)
+        end
+        
+        arg.Label.TextColor3 = oh.Constants.Syntax[robloxValueType] or oh.Constants.Syntax[valueType]
     end
     
-    arg.Label.TextColor3 = oh.Constants.Syntax[valueType]
+    arg.Index.Text = index
     arg.Name = tostring(index)
     arg.Parent = instance.Contents
 
@@ -402,7 +416,14 @@ function ArgsLog.new(log, callInfo)
     else
         for i = 1, #args do
             local v = args[i]
-            height = height + createArg(instance, i, v)
+            local success, argHeight = pcall(createArg, instance, i, v)
+            if success and argHeight then
+                height = height + argHeight
+            else
+                -- Fallback for problematic arguments
+                height = height + 25 -- Default height
+                warn("Failed to create argument display for index " .. i .. ": " .. tostring(v))
+            end
         end
     end
 
@@ -413,6 +434,8 @@ function ArgsLog.new(log, callInfo)
         selected.callPodButton = button
     end)
 
+    -- Ensure minimum height and prevent negative heights
+    height = math.max(height, 25)
     button.Instance.Size = button.Instance.Size + UDim2.new(0, 0, 0, height)
 
     return button 
@@ -538,9 +561,13 @@ end
 
 ListSearch.FocusLost:Connect(function(returned)
     if returned then
+        local searchText = ListSearch.Text:lower()
         for remoteInstance, log in pairs(currentLogs) do
             local instance = log.Button.Instance
-            instance.Visible = not (instance.Visible and not remoteInstance.Name:lower():find(ListSearch.Text))
+            local originalName = remoteInstance.Name:lower()
+            local cleanName = StringMethods.cleanRemoteName(remoteInstance.Name):lower()
+            local shouldShow = originalName:find(searchText) or cleanName:find(searchText)
+            instance.Visible = not (instance.Visible and not shouldShow)
         end
 
         remoteList:Recalculate()
@@ -625,7 +652,7 @@ NewConditionButtons.Add.MouseButton1Click:Connect(function()
 
     if status ~= "Ignore" and status ~= "Block" then
         MessageBox.Show("Error", "Invalid condition status", MessageType.OK)
-    elseif not oh.Constants.Types[type] and not isUserdata(type) then
+    elseif not oh.Constants.Types[type] and not isUserdata(type) and type ~= "buffer" then
         MessageBox.Show("Error", "Invalid condition type", MessageType.OK)
     elseif valueType ~= "Value" and valueType ~= "Type" then
         MessageBox.Show("Error", "Invalid condition value association", MessageType.OK)
@@ -645,6 +672,15 @@ NewConditionButtons.Add.MouseButton1Click:Connect(function()
                 value = false
             else
                 return MessageBox.Show("Error", "Your input does not match the type you selected", MessageType.OK)
+            end
+        elseif type == "buffer" then
+            if valueType == "Value" then
+                local bufferSize = tonumber(value)
+                if bufferSize and bufferSize > 0 then
+                    value = buffer.create(bufferSize)
+                else
+                    return MessageBox.Show("Error", "Buffer size must be a positive number", MessageType.OK)
+                end
             end
         else 
             local success, result = pcall(loadstring("return " .. value))
@@ -892,6 +928,8 @@ scriptContext:SetCallback(function()
                 v = (typeof(v) == "Instance" and getInstancePath(v)) or userdataValue(v)
             elseif valueType == "table" then
                 v = tableToString(v)
+            elseif robloxValueType == "buffer" then
+                v = userdataValue(v)
             elseif valueType == "string" then
                 v = dataToString(v)
             else
@@ -959,22 +997,49 @@ end)
 
 viewAsHexContext:SetCallback(function()
     selected.callPodButton.hexViewEnabled = not selected.callPodButton.hexViewEnabled
-    if not selected.callPodButton.oldStrings then
-        selected.callPodButton.oldStrings = {}
+    if not selected.callPodButton.oldData then
+        selected.callPodButton.oldData = {}
     end
 
     for idx, arg in pairs(selected.args) do
-        if type(arg) == "string" then
-            local textObject = selected.callPodButton.Instance.Contents[tostring(idx)].Label
+        local argType = type(arg)
+        local robloxArgType = typeof(arg)
+        local textObject = selected.callPodButton.Instance.Contents[tostring(idx)].Label
+        
+        if argType == "string" or robloxArgType == "buffer" then
             if selected.callPodButton.hexViewEnabled then
-                selected.callPodButton.oldStrings[idx] = arg
+                selected.callPodButton.oldData[idx] = arg
                 local hexString = ""
-                for i = 1, #arg do
-                    hexString = hexString .. string.format("%02X ", arg:byte(i, i))
+                
+                if argType == "string" then
+                    for i = 1, #arg do
+                        hexString = hexString .. string.format("%02X ", arg:byte(i, i))
+                    end
+                elseif robloxArgType == "buffer" then
+                    local success, bufferLength = pcall(buffer.len, arg)
+                    if success and bufferLength then
+                        for i = 0, bufferLength - 1 do
+                            local byteSuccess, byteValue = pcall(buffer.readu8, arg, i)
+                            if byteSuccess then
+                                hexString = hexString .. string.format("%02X ", byteValue)
+                            else
+                                hexString = hexString .. "?? "
+                            end
+                        end
+                        hexString = hexString:sub(1, -2) -- Remove trailing space
+                    else
+                        hexString = "[Invalid Buffer]"
+                    end
                 end
+                
                 textObject.Text = hexString
             else
-                textObject.Text = dataToString(selected.callPodButton.oldStrings[idx])
+                local originalData = selected.callPodButton.oldData[idx]
+                if argType == "string" then
+                    textObject.Text = dataToString(originalData)
+                elseif robloxArgType == "buffer" then
+                    textObject.Text = toString(originalData)
+                end
             end
         end
     end
