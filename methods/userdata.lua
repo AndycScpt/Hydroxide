@@ -44,6 +44,13 @@ local function userdataValue(data)
         return "aux.placeholderUserdataConstant"
     elseif dataType == "Instance" then
         return data.Name
+    elseif dataType == "buffer" then
+        local success, length = pcall(buffer.len, data)
+        if success and length then
+            return "buffer.create(" .. length .. ")"
+        else
+            return "buffer.create(0) -- Invalid buffer"
+        end
     elseif dataType == "BrickColor" then
         return dataType .. ".new(\"" .. tostring(data) .. "\")"
     elseif
@@ -111,6 +118,7 @@ local function isUserdata(type)
         or type == "NumberRange"
         or type == "NumberSequence"
         or type == "NumberSequenceKeypoint"
+        or type == "buffer"
 end
 
 methods.isUserdata = isUserdata
