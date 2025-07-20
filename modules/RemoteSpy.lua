@@ -129,7 +129,11 @@ for _name, hook in pairs(methodHooks) do
 
         if instance.ClassName == _name and remotesViewing[instance.ClassName] and instance ~= remoteDataEvent then
             local remote = currentRemotes[instance]
-            local vargs = {select(2, ...)}
+            local numArgs = select('#', ...)
+            local vargs = {}
+            for i = 2, numArgs do
+                table.insert(vargs, select(i, ...))
+            end
 
             if not remote then
                 remote = Remote.new(instance)
