@@ -74,11 +74,11 @@ nmcTrampoline = hookMetaMethod(game, "__namecall", function(...)
         
     if remotesViewing[instance.ClassName] and instance ~= remoteDataEvent and remoteMethods[method] then
         local remote = currentRemotes[instance]
-        local vargs = {select(2, ...)}
-            
-        if not remote then
-            remote = Remote.new(instance)
-            currentRemotes[instance] = remote
+        
+        local numArgs = select('#', ...)
+        local vargs = {}
+        for i = 2, numArgs do
+            table.insert(vargs, (select(i, ...)))
         end
 
         local remoteIgnored = remote.Ignored
@@ -129,11 +129,13 @@ for _name, hook in pairs(methodHooks) do
 
         if instance.ClassName == _name and remotesViewing[instance.ClassName] and instance ~= remoteDataEvent then
             local remote = currentRemotes[instance]
+                    
             local numArgs = select('#', ...)
             local vargs = {}
             for i = 2, numArgs do
-                table.insert(vargs, select(i, ...))
+                table.insert(vargs, (select(i, ...)))
             end
+            
 
             if not remote then
                 remote = Remote.new(instance)
