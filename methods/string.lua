@@ -1,5 +1,166 @@
 local methods = {}
 
+local BUFFER_PREVIEW_BYTES = 64
+
+local gsubCharacters = {
+    ["\""] = "\\\"",
+    ["\\"] = "\\\\",
+    ["\0"] = "\\0",
+    ["\n"] = "\\n",
+    ["\t"] = "\\t",
+    ["\f"] = "\\f",
+    ["\r"] = "\\r",
+    ["\v"] = "\\v",
+    ["\a"] = "\\a",
+    ["\b"] = "\\b"
+}
+
+local function getBufferContents(bufferData)
+    local success, length = pcall(buffer.len, bufferData)
+    if not success or type(length) ~= "number" then
+        return nil, nil
+    end
+
+    local tostringSuccess, contents = pcall(buffer.tostring, bufferData)
+    if tostringSuccess and type(contents) == "string" then
+        return contents, length
+    end
+
+    local chunks = {}
+    for i = 0, length - 1 do
+        local byteSuccess, byteValue = pcall(buffer.readu8, bufferData, i)
+        chunks[i + 1] = string.char((byteSuccess and byteValue) or 0)
+    end
+
+    return table.concat(chunks), length
+end
+
+local function isMostlyText(contents)
+    local length = #contents
+    if length == 0 then
+        return true
+    end
+
+    local printable = 0
+    for i = 1, length do
+        local byteValue = contents:byte(i)
+        if (byteValue >= 32 and byteValue <= 126) or byteValue == 9 or byteValue == 10 or byteValue == 13 then
+            printable = printable + 1
+        end
+    end
+
+    return (printable / length) >= 0.85
+end
+
+local function escapePreviewText(contents)
+    return contents:gsub("[%c%z]", function(character)
+        local byteValue = character:byte()
+        if byteValue == 9 then
+            return "\\t"
+        elseif byteValue == 10 then
+            return "\\n"
+        elseif byteValue == 13 then
+            return "\\r"
+        end
+
+        return string.format("\\x%02X", byteValue)
+    end)
+end
+
+local function bytesToLuaString(contents)
+    local chunks = { '"' }
+
+    for i = 1, #contents do
+        local byteValue = contents:byte(i)
+        if byteValue == 34 then
+            chunks[#chunks + 1] = '\\"'
+        elseif byteValue == 92 then
+            chunks[#chunks + 1] = '\\\\'
+        elseif byteValue >= 32 and byteValue <= 126 then
+            chunks[#chunks + 1] = string.char(byteValue)
+        else
+            chunks[#chunks + 1] = string.format("\\x%02X", byteValue)
+        end
+    end
+
+    chunks[#chunks + 1] = '"'
+    return table.concat(chunks)
+end
+
+local function bufferToHex(bufferData, maxBytes)
+    local contents, length = getBufferContents(bufferData)
+    if not contents then
+        return ""
+    end
+
+    local limit = length
+    if type(maxBytes) == "number" then
+        limit = math.min(length, maxBytes)
+    end
+
+    local chunks = {}
+    for i = 1, limit do
+        chunks[i] = string.format("%02X", contents:byte(i))
+    end
+
+    local hexString = table.concat(chunks, " ")
+    if limit < length then
+        return hexString .. " ..."
+    end
+
+    return hexString
+end
+
+local function decodeBuffer(bufferData)
+    local contents, length = getBufferContents(bufferData)
+    if not contents then
+        return "buffer(?? bytes)"
+    end
+
+    if length == 0 then
+        return "buffer(0 bytes)"
+    end
+
+    if isMostlyText(contents) then
+        local preview = contents
+        if #preview > BUFFER_PREVIEW_BYTES then
+            preview = preview:sub(1, BUFFER_PREVIEW_BYTES) .. "..."
+        end
+
+        return ("buffer(%d): %s"):format(length, escapePreviewText(preview))
+    end
+
+    return ("buffer(%d): %s"):format(length, bufferToHex(bufferData, BUFFER_PREVIEW_BYTES))
+end
+
+local function bufferToLua(bufferData)
+    local contents, length = getBufferContents(bufferData)
+    if not contents then
+        return "buffer.create(0) -- Invalid buffer"
+    end
+
+    if length == 0 then
+        return "buffer.create(0)"
+    end
+
+    if buffer.fromstring then
+        return "buffer.fromstring(" .. bytesToLuaString(contents) .. ")"
+    end
+
+    local lines = {
+        "(function()",
+        ("\tlocal b = buffer.create(%d)"):format(length)
+    }
+
+    for i = 1, length do
+        lines[#lines + 1] = ("\tbuffer.writeu8(b, %d, %d)"):format(i - 1, contents:byte(i))
+    end
+
+    lines[#lines + 1] = "\treturn b"
+    lines[#lines + 1] = "end)()"
+    return table.concat(lines, "\n")
+end
+
 local function toString(value)
     local dataType = typeof(value)
 
@@ -24,29 +185,11 @@ local function toString(value)
         local closureName = getInfo(value).name or ''
         return (closureName == '' and "Unnamed function") or closureName
     elseif dataType == "buffer" then
-        local success, length = pcall(buffer.len, value)
-        if success and length then
-            return "buffer(" .. length .. " bytes)"
-        else
-            return "buffer(?? bytes)"
-        end
+        return decodeBuffer(value)
     else
         return tostring(value)
     end
 end
-
-local gsubCharacters = {
-    ["\""] = "\\\"",
-    ["\\"] = "\\\\",
-    ["\0"] = "\\0",
-    ["\n"] = "\\n",
-    ["\t"] = "\\t",
-    ["\f"] = "\\f",
-    ["\r"] = "\\r",
-    ["\v"] = "\\v",
-    ["\a"] = "\\a",
-    ["\b"] = "\\b"
-}
 
 local function dataToString(data)
     local dataType = type(data)
@@ -63,12 +206,7 @@ local function dataToString(data)
 
         return userdataValue(data)
     elseif robloxDataType == "buffer" then
-        local success, length = pcall(buffer.len, data)
-        if success and length then
-            return "buffer.create(" .. length .. ")"
-        else
-            return "buffer.create(0) -- Invalid buffer"
-        end
+        return bufferToLua(data)
     end
 
     return tostring(data)
@@ -83,21 +221,6 @@ local function toUnicode(string)
     
     return codepoints:sub(1, -3) .. ')'
 end
-
-local function bufferToHex(bufferData)
-    local hexString = ""
-    local bufferLength = buffer.len(bufferData)
-    
-    for i = 0, bufferLength - 1 do
-        hexString = hexString .. string.format("%02X ", buffer.readu8(bufferData, i))
-    end
-    
-    return hexString:sub(1, -2) -- Remove trailing space
-end
-
-
-
-
 
 local function cleanRemoteName(name)
     -- Handle Unicode escape sequences and special characters in remote names
@@ -142,5 +265,7 @@ methods.toString = toString
 methods.dataToString = dataToString
 methods.toUnicode = toUnicode
 methods.bufferToHex = bufferToHex
+methods.decodeBuffer = decodeBuffer
+methods.bufferToLua = bufferToLua
 methods.cleanRemoteName = cleanRemoteName
 return methods

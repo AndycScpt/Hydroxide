@@ -113,7 +113,8 @@ environment.oh = {
             vector = "rbxassetid://4666594723",
             ["function"] = "rbxassetid://4666593447",
             ["thread"] = "rbxassetid://4666593447",
-            ["integral"] = "rbxassetid://4666593882"
+            ["integral"] = "rbxassetid://4666593882",
+            buffer = "rbxassetid://4666593882"
         },
         Syntax = {
             ["nil"] = Color3.fromRGB(244, 135, 113),
@@ -125,7 +126,8 @@ environment.oh = {
             vector = Color3.fromRGB(225, 225, 225),
             ["function"] = Color3.fromRGB(225, 225, 225),
             ["thread"] = Color3.fromRGB(225, 225, 225),
-            ["unnamed_function"] = Color3.fromRGB(175, 175, 175)
+            ["unnamed_function"] = Color3.fromRGB(175, 175, 175),
+            buffer = Color3.fromRGB(255, 200, 100)
         }
     },
     Exit = function()

@@ -45,12 +45,7 @@ local function userdataValue(data)
     elseif dataType == "Instance" then
         return data.Name
     elseif dataType == "buffer" then
-        local success, length = pcall(buffer.len, data)
-        if success and length then
-            return "buffer.create(" .. length .. ")"
-        else
-            return "buffer.create(0) -- Invalid buffer"
-        end
+        return bufferToLua(data)
     elseif dataType == "BrickColor" then
         return dataType .. ".new(\"" .. tostring(data) .. "\")"
     elseif

@@ -946,7 +946,7 @@ scriptContext:SetCallback(function()
             elseif valueType == "table" then
                 v = tableToString(v)
             elseif robloxValueType == "buffer" then
-                v = userdataValue(v)
+                v = bufferToLua(v)
             elseif valueType == "string" then
                 v = dataToString(v)
             else
@@ -1038,18 +1038,8 @@ viewAsHexContext:SetCallback(function()
                         hexString = hexString .. string.format("%02X ", arg:byte(i, i))
                     end
                 elseif robloxArgType == "buffer" then
-                    local success, bufferLength = pcall(buffer.len, arg)
-                    if success and bufferLength then
-                        for i = 0, bufferLength - 1 do
-                            local byteSuccess, byteValue = pcall(buffer.readu8, arg, i)
-                            if byteSuccess then
-                                hexString = hexString .. string.format("%02X ", byteValue)
-                            else
-                                hexString = hexString .. "?? "
-                            end
-                        end
-                        hexString = hexString:sub(1, -2)
-                    else
+                    hexString = bufferToHex(arg)
+                    if hexString == "" then
                         hexString = "[Invalid Buffer]"
                     end
                 end
@@ -1060,7 +1050,7 @@ viewAsHexContext:SetCallback(function()
                 if argType == "string" then
                     textObject.Text = dataToString(originalData)
                 elseif robloxArgType == "buffer" then
-                    textObject.Text = toString(originalData)
+                    textObject.Text = decodeBuffer(originalData)
                 end
             end
         end
