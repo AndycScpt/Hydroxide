@@ -185,11 +185,7 @@ function Condition.new(remote, status, index, value, type)
             table.insert(selected.conditions, condition)
         end
     end)
-    
-    if byType then
-        instance.Identifiers.ByType.Visible = false
-    end 
-    
+
     identifiers.ByType.Visible = type ~= nil
     identifiers.Status.Image = (status == "Ignore" and icons.ignore) or icons.block
     identifiers.Status.Border.Image = identifiers.Status.Image
@@ -212,10 +208,10 @@ function Condition.toggle(condition)
     local blockedArgs = remote.BlockedArgs[index]
     local argStatus = (condition.Status == "Ignore" and ignoredArgs) or blockedArgs
 
-    if value then
-        argStatus.values[value] = condition.Enabled or nil
-    else
+    if condition.Type then
         argStatus.types[condition.Type] = condition.Enabled or nil
+    else
+        argStatus.values[value] = condition.Enabled or nil
     end
 end
 
@@ -223,10 +219,10 @@ function Condition.remove(condition)
     local branch = condition.Branch
     condition.Button:Remove()
 
-    if condition.Value then
-        branch.values[condition.Value] = nil
-    else
+    if condition.Type then
         branch.types[condition.Type] = nil
+    else
+        branch.values[condition.Value] = nil
     end
 end
 
@@ -359,16 +355,27 @@ function Log.new(remote)
     log.BlockAnimation = blockAnimation
     log.IgnoreAnimation = ignoreAnimation
     log.NormalAnimation = normalAnimation
-    log.NormalAnimation = normalAnimation
     log.Clear = Log.clear
     log.PlayBlock = Log.playBlock
     log.PlayIgnore = Log.playIgnore
     log.PlayNormal = Log.playNormal
     log.Adjust = Log.adjust
     log.IncrementCalls = Log.incrementCalls
-    log.Decrementcalls = Log.decrementCalls
+    log.DecrementCalls = Log.decrementCalls
     log.Remove = Log.remove
     return log
+end
+
+local function getArgsCount(args)
+    if type(args) ~= "table" then
+        return 0
+    end
+
+    if type(args.n) == "number" then
+        return args.n
+    end
+
+    return #args
 end
 
 local function createArg(instance, index, value)
@@ -376,23 +383,22 @@ local function createArg(instance, index, value)
     local valueType = type(value)
     local robloxValueType = typeof(value)
 
-    -- Handle buffer type properly
     if robloxValueType == "buffer" then
         arg.Icon.Image = oh.Constants.Types["buffer"] or oh.Constants.Types["userdata"] or oh.Constants.Types[valueType] or icons.buffer
         arg.Label.Text = StringMethods.toString(value)
         arg.Label.TextColor3 = oh.Constants.Syntax["buffer"] or oh.Constants.Syntax["userdata"] or oh.Constants.Syntax[valueType] or Color3.fromRGB(255, 255, 255)
     else
-        arg.Icon.Image = oh.Constants.Types[robloxValueType] or oh.Constants.Types[valueType]
-        
+        arg.Icon.Image = oh.Constants.Types[robloxValueType] or oh.Constants.Types[valueType] or oh.Constants.Types["nil"]
+
         if valueType == "table" then
             arg.Label.Text = toString(value)
         else
             arg.Label.Text = dataToString(value)
         end
-        
-        arg.Label.TextColor3 = oh.Constants.Syntax[robloxValueType] or oh.Constants.Syntax[valueType]
+
+        arg.Label.TextColor3 = oh.Constants.Syntax[robloxValueType] or oh.Constants.Syntax[valueType] or oh.Constants.Syntax["nil"]
     end
-    
+
     arg.Index.Text = index
     arg.Name = tostring(index)
     arg.Parent = instance.Contents
@@ -403,6 +409,7 @@ end
 function ArgsLog.new(log, callInfo)
     local instance = Assets.CallPod:Clone()
     local args = callInfo.args
+    local argCount = getArgsCount(args)
 
     if selected.remoteLog ~= log then
         instance.Visible = false
@@ -411,17 +418,16 @@ function ArgsLog.new(log, callInfo)
     local button = ListButton.new(instance, remoteLogs)
     local height = 0
 
-    if #args == 0 then
+    if argCount == 0 then
         height = height + createArg(instance, 1, nil)
     else
-        for i = 1, #args do
+        for i = 1, argCount do
             local v = args[i]
             local success, argHeight = pcall(createArg, instance, i, v)
             if success and argHeight then
                 height = height + argHeight
             else
-                -- Fallback for problematic arguments
-                height = height + 25 -- Default height
+                height = height + 25
                 warn("Failed to create argument display for index " .. i .. ": " .. tostring(v))
             end
         end
@@ -434,7 +440,6 @@ function ArgsLog.new(log, callInfo)
         selected.callPodButton = button
     end)
 
-    -- Ensure minimum height and prevent negative heights
     height = math.max(height, 25)
     button.Instance.Size = button.Instance.Size + UDim2.new(0, 0, 0, height)
 
@@ -562,12 +567,16 @@ end
 ListSearch.FocusLost:Connect(function(returned)
     if returned then
         local searchText = ListSearch.Text:lower()
+
         for remoteInstance, log in pairs(currentLogs) do
             local instance = log.Button.Instance
             local originalName = remoteInstance.Name:lower()
             local cleanName = StringMethods.cleanRemoteName(remoteInstance.Name):lower()
-            local shouldShow = originalName:find(searchText) or cleanName:find(searchText)
-            instance.Visible = not (instance.Visible and not shouldShow)
+            local matches = searchText == ""
+                or originalName:find(searchText, 1, true) ~= nil
+                or cleanName:find(searchText, 1, true) ~= nil
+
+            instance.Visible = remotesViewing[remoteInstance.ClassName] and matches
         end
 
         remoteList:Recalculate()
@@ -845,7 +854,7 @@ blockContextSelected:SetCallback(function()
     for _i, log in pairs(selected.logs) do
         local remote = log.Remote
 
-        if remote.Blocked then
+        if not remote.Blocked then
             remote:Block()
         end
 
@@ -853,6 +862,8 @@ blockContextSelected:SetCallback(function()
             log:PlayBlock()
         elseif remote.Ignored then
             log:PlayIgnore()
+        else
+            log:PlayNormal()
         end
     end
 
@@ -863,7 +874,9 @@ unblockContextSelected:SetCallback(function()
     for _i, log in pairs(selected.logs) do
         local remote = log.Remote
 
-        remote:Unblock()
+        if remote.Blocked then
+            remote:Block()
+        end
 
         if remote.Ignored then
             log:PlayIgnore()
@@ -912,19 +925,23 @@ scriptContext:SetCallback(function()
     local oldStatus = oh.getStatus()
     oh.setStatus("Generating RemoteSpy Pseudocode ...")
 
-    if #selected.args == 0 then
+    local selectedArgs = selected.args
+    local argCount = getArgsCount(selectedArgs)
+
+    if argCount == 0 then
         setClipboard(script .. remotePath .. ':' .. method .. "()")
     else
-        local selectedArgs = selected.args
         local args = ""
 
-        for i = 1, #selectedArgs do
+        for i = 1, argCount do
             local v = selectedArgs[i]
             local valueType = type(v)
             local robloxValueType = typeof(v)
             local variableName = robloxValueType:sub(1, 1):upper() .. robloxValueType:sub(2)
 
-            if valueType == "userdata" or valueType == "vector" then
+            if valueType == "nil" then
+                v = "nil"
+            elseif valueType == "userdata" or valueType == "vector" then
                 v = (typeof(v) == "Instance" and getInstancePath(v)) or userdataValue(v)
             elseif valueType == "table" then
                 v = tableToString(v)
@@ -936,7 +953,7 @@ scriptContext:SetCallback(function()
                 v = toString(v)
             end
 
-            script = script .. ("local oh%s%d = %s\n"):format(variableName, i, v) 
+            script = script .. ("local oh%s%d = %s\n"):format(variableName, i, v)
             args = args .. ("oh%s%d, "):format(variableName, i)
         end
 
@@ -988,7 +1005,8 @@ repeatCallContext:SetCallback(function()
     local oldStatus = oh.getStatus()
     oh.setStatus("Recalling " .. remoteInstance.Name)
 
-    remoteInstance[method](remoteInstance, unpack(selected.args))
+    local selectedArgs = selected.args
+    remoteInstance[method](remoteInstance, unpack(selectedArgs, 1, getArgsCount(selectedArgs)))
 
     wait(0.25)
 
@@ -1001,16 +1019,20 @@ viewAsHexContext:SetCallback(function()
         selected.callPodButton.oldData = {}
     end
 
-    for idx, arg in pairs(selected.args) do
+    local selectedArgs = selected.args
+    for idx = 1, getArgsCount(selectedArgs) do
+        local arg = selectedArgs[idx]
         local argType = type(arg)
         local robloxArgType = typeof(arg)
-        local textObject = selected.callPodButton.Instance.Contents[tostring(idx)].Label
-        
-        if argType == "string" or robloxArgType == "buffer" then
+        local contents = selected.callPodButton.Instance.Contents
+        local argFrame = contents:FindFirstChild(tostring(idx))
+        local textObject = argFrame and argFrame:FindFirstChild("Label")
+
+        if textObject and (argType == "string" or robloxArgType == "buffer") then
             if selected.callPodButton.hexViewEnabled then
                 selected.callPodButton.oldData[idx] = arg
                 local hexString = ""
-                
+
                 if argType == "string" then
                     for i = 1, #arg do
                         hexString = hexString .. string.format("%02X ", arg:byte(i, i))
@@ -1026,12 +1048,12 @@ viewAsHexContext:SetCallback(function()
                                 hexString = hexString .. "?? "
                             end
                         end
-                        hexString = hexString:sub(1, -2) -- Remove trailing space
+                        hexString = hexString:sub(1, -2)
                     else
                         hexString = "[Invalid Buffer]"
                     end
                 end
-                
+
                 textObject.Text = hexString
             else
                 local originalData = selected.callPodButton.oldData[idx]

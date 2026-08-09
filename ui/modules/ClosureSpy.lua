@@ -169,10 +169,6 @@ function Condition.new(closure, status, index, value, type)
         end
     end)
     
-    if byType then
-        instance.Identifiers.ByType.Visible = false
-    end 
-    
     identifiers.ByType.Visible = type ~= nil
     identifiers.Status.Image = (status == "Ignore" and icons.ignore) or icons.block
     identifiers.Status.Border.Image = identifiers.Status.Image
@@ -195,10 +191,10 @@ function Condition.toggle(condition)
     local blockedArgs = closure.BlockedArgs[index]
     local argStatus = (condition.Status == "Ignore" and ignoredArgs) or blockedArgs
 
-    if value then
-        argStatus.values[value] = condition.Enabled or nil
-    else
+    if condition.Type then
         argStatus.types[condition.Type] = condition.Enabled or nil
+    else
+        argStatus.values[value] = condition.Enabled or nil
     end
 end
 
@@ -206,10 +202,10 @@ function Condition.remove(condition)
     local branch = condition.Branch
     condition.Button:Remove()
 
-    if condition.Value then
-        branch.values[condition.Value] = nil
-    else
+    if condition.Type then
         branch.types[condition.Type] = nil
+    else
+        branch.values[condition.Value] = nil
     end
 end
 
@@ -377,9 +373,22 @@ local function createArg(instance, index, value)
     return arg.AbsoluteSize.Y + 5
 end
 
+local function getArgsCount(args)
+    if type(args) ~= "table" then
+        return 0
+    end
+
+    if type(args.n) == "number" then
+        return args.n
+    end
+
+    return #args
+end
+
 function ArgsLog.new(log, call)
     local instance = Assets.CallPod:Clone()
     local args = call.args
+    local argCount = getArgsCount(args)
 
     if selected.hookLog ~= log then
         instance.Visible = false
@@ -388,10 +397,10 @@ function ArgsLog.new(log, call)
     local button = ListButton.new(instance, hookLogs)
     local height = 0
 
-    if #args == 0 then
+    if argCount == 0 then
         height = height + createArg(instance, 1, nil)
     else
-        for i = 1, #args do
+        for i = 1, argCount do
             local v = args[i]
             height = height + createArg(instance, i, v)
         end
@@ -805,33 +814,37 @@ scriptContext:SetCallback(function()
     local oldStatus = oh.getStatus()
     oh.setStatus("Generating ClosureSpy Pseudocode ...")
 
-    if #selected.args == 0 then
+    local selectedArgs = selected.args
+    local argCount = getArgsCount(selectedArgs)
+
+    if argCount == 0 then
         script = script .. "-- Function was called with no arguments.\n"
         setClipboard(script)
     else
-        local selectedArgs = selected.args
         local argsString = ""
         local argDeclarations = ""
 
-        for i = 1, #selectedArgs do
+        for i = 1, argCount do
             local v = selectedArgs[i]
             local valueType = type(v)
             local robloxValueType = typeof(v)
             local variableName = robloxValueType:sub(1, 1):upper() .. robloxValueType:sub(2)
 
-            if valueType == "userdata" or valueType == "vector" then
+            if valueType == "nil" then
+                v = "nil"
+            elseif valueType == "userdata" or valueType == "vector" then
                 v = (typeof(v) == "Instance" and getInstancePath(v)) or userdataValue(v)
             elseif valueType == "table" then
                 v = tableToString(v)
             else
                 v = dataToString(v)
             end
-            
+
             local var = ("oh%s%d"):format(variableName, i)
             argDeclarations = argDeclarations .. ("local %s = %s\n"):format(var, v)
             argsString = argsString .. (var .. ", ")
         end
-        
+
         script = script .. argDeclarations .. "\n"
         script = script .. "-- Example call (requires adaptation):\n"
         script = script .. ("-- some_function(%s)"):format(argsString:sub(1, -3))

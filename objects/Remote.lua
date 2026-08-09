@@ -75,28 +75,31 @@ function Remote.ignoreArg(remote, index, value, byType)
     end
 end
 
-function Remote.areArgsBlocked(remote, args)
-    local blockedArgs = remote.BlockedArgs
+local function argsMatchFilter(filterArgs, args)
+    local count = args.n
 
-    for index, value in pairs(args) do
-        local indexBlock = blockedArgs[index]
-        
-        if indexBlock and ( indexBlock.types[typeof(value)] or indexBlock.values[value] ~= nil ) then
+    if type(count) ~= "number" then
+        count = #args
+    end
+
+    for index = 1, count do
+        local value = args[index]
+        local indexFilter = filterArgs[index]
+
+        if indexFilter and (indexFilter.types[typeof(value)] or indexFilter.values[value] ~= nil) then
             return true
         end
     end
+
+    return false
+end
+
+function Remote.areArgsBlocked(remote, args)
+    return argsMatchFilter(remote.BlockedArgs, args)
 end
 
 function Remote.areArgsIgnored(remote, args)
-    local ignoredArgs = remote.IgnoredArgs
-
-    for index, value in pairs(args) do
-        local indexIgnore = ignoredArgs[index]
-
-        if indexIgnore and ( indexIgnore.types[typeof(value)] or indexIgnore.values[value] ~= nil ) then
-            return true
-        end
-    end
+    return argsMatchFilter(remote.IgnoredArgs, args)
 end
 
 function Remote.incrementCalls(remote, vargs)

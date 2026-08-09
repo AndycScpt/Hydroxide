@@ -17,10 +17,21 @@ local requiredMethods = {
 
 local eventCallback
 
+local function packArgs(...)
+    local n = select("#", ...)
+    local args = { n = n }
+
+    for i = 1, n do
+        args[i] = select(i, ...)
+    end
+
+    return args
+end
+
 -- Define as global function in order to reduce upvalue count in hooks
 function log(hook, callingScript, ...)
-    local vargs = {...}
-    
+    local vargs = packArgs(...)
+
     if eventCallback and not hook:AreArgsIgnored(vargs) then
         local call = {
             script = callingScript,
@@ -52,7 +63,7 @@ function Hook.new(closure)
 
     local wrap = { hook, data }
     hookCache[data] = hookFunction(data, function(...)
-        local vargs = {...}
+        local vargs = packArgs(...)
         local uHook = wrap[1]
         local uData = wrap[2]
 
@@ -145,13 +156,18 @@ function Hook.ignoreArg(hook, index, value, byType)
     end
 end
 
-function Hook.areArgsBlocked(hook, args)
-    local blockedArgs = hook.BlockedArgs
+local function argsMatchFilter(filterArgs, args)
+    local count = args.n
 
-    for index, value in pairs(args) do
-        local indexBlock = blockedArgs[index]
-        
-        if indexBlock and ( indexBlock.types[typeof(value)] or indexBlock.values[value] ~= nil ) then
+    if type(count) ~= "number" then
+        count = #args
+    end
+
+    for index = 1, count do
+        local value = args[index]
+        local indexFilter = filterArgs[index]
+
+        if indexFilter and (indexFilter.types[typeof(value)] or indexFilter.values[value] ~= nil) then
             return true
         end
     end
@@ -159,18 +175,12 @@ function Hook.areArgsBlocked(hook, args)
     return false
 end
 
+function Hook.areArgsBlocked(hook, args)
+    return argsMatchFilter(hook.BlockedArgs, args)
+end
+
 function Hook.areArgsIgnored(hook, args)
-    local ignoredArgs = hook.IgnoredArgs
-
-    for index, value in pairs(args) do
-        local indexIgnore = ignoredArgs[index]
-
-        if indexIgnore and ( indexIgnore.types[typeof(value)] or indexIgnore.values[value] ~= nil ) then
-            return true
-        end
-    end
-
-    return false
+    return argsMatchFilter(hook.IgnoredArgs, args)
 end
 
 function Hook.incrementCalls(hook, vargs)
