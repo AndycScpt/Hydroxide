@@ -48,7 +48,12 @@ local methodHooks = {
 local currentRemotes = {}
 
 local remoteDataEvent = Instance.new("BindableEvent")
+-- Cache the Fire function so logging never goes through __namecall (which would
+-- clobber getnamecallmethod and make RemoteEvent calls look like :Fire()).
+local remoteDataFire = remoteDataEvent.Fire
 local eventSet = false
+
+local setNamecallMethod = setnamecallmethod or set_namecall_method
 
 local function connectEvent(callback)
     remoteDataEvent.Event:Connect(callback)
@@ -89,14 +94,7 @@ local function normalizeMethod(method)
     return method
 end
 
-local function getCallerFunction()
-    local success, info = pcall(getInfo, 3)
-    if success and type(info) == "table" then
-        return info.func
-    end
-end
-
-local function processRemote(instance, vargs)
+local function processRemote(instance, vargs, callFunc)
     local remote = currentRemotes[instance]
 
     if not remote then
@@ -113,11 +111,11 @@ local function processRemote(instance, vargs)
         local call = {
             script = getCallingScript((PROTOSMASHER_LOADED ~= nil and 2) or nil),
             args = vargs,
-            func = getCallerFunction()
+            func = callFunc
         }
 
         remote:IncrementCalls(call)
-        remoteDataEvent:Fire(instance, call)
+        remoteDataFire(remoteDataEvent, instance, call)
     end
 
     return remoteBlocked or argsBlocked
@@ -131,12 +129,25 @@ nmcTrampoline = hookMetaMethod(game, "__namecall", function(...)
         return nmcTrampoline(...)
     end
 
-    local method = normalizeMethod(getNamecallMethod())
+    local rawMethod = getNamecallMethod()
+    local method = normalizeMethod(rawMethod)
 
     if remotesViewing[instance.ClassName] and instance ~= remoteDataEvent and remoteMethods[method] then
         local vargs = packCallArgs(...)
+        local callFunc
+        local infoOk, info = pcall(getInfo, 3)
+        if infoOk and type(info) == "table" then
+            callFunc = info.func
+        end
 
-        if processRemote(instance, vargs) then
+        local blocked = processRemote(instance, vargs, callFunc)
+
+        -- Restore namecall method in case anything during logging clobbered it.
+        if setNamecallMethod then
+            pcall(setNamecallMethod, rawMethod)
+        end
+
+        if blocked then
             return
         end
     end
@@ -150,8 +161,20 @@ local function checkPermission(instance)
     if (instance.ClassName) then end
 end
 
+-- Hook each unique method function once (RemoteEvent/UnreliableRemoteEvent may share FireServer).
+local hookedMethods = {}
+
 for className, hook in pairs(methodHooks) do
-    if hook then
+    if hook and not hookedMethods[hook] then
+        hookedMethods[hook] = true
+
+        local allowedClasses = {}
+        for otherClass, otherHook in pairs(methodHooks) do
+            if otherHook == hook then
+                allowedClasses[otherClass] = true
+            end
+        end
+
         local originalMethod
         originalMethod = hookFunction(hook, newCClosure(function(...)
             local instance = ...
@@ -167,10 +190,16 @@ for className, hook in pairs(methodHooks) do
                 end
             end
 
-            if instance.ClassName == className and remotesViewing[instance.ClassName] and instance ~= remoteDataEvent then
+            local instanceClass = instance.ClassName
+            if allowedClasses[instanceClass] and remotesViewing[instanceClass] and instance ~= remoteDataEvent then
                 local vargs = packCallArgs(...)
+                local callFunc
+                local infoOk, info = pcall(getInfo, 3)
+                if infoOk and type(info) == "table" then
+                    callFunc = info.func
+                end
 
-                if processRemote(instance, vargs) then
+                if processRemote(instance, vargs, callFunc) then
                     return
                 end
             end
