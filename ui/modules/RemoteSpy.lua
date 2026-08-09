@@ -946,7 +946,7 @@ scriptContext:SetCallback(function()
             elseif valueType == "table" then
                 v = tableToString(v)
             elseif robloxValueType == "buffer" then
-                v = bufferToLua(v)
+                v = bufferToLua(v, ("ohBuffer%d"):format(i))
             elseif valueType == "string" then
                 v = dataToString(v)
             else
