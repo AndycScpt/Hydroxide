@@ -188,104 +188,126 @@ useMethods(globalMethods)
 
 local HttpService = game:GetService("HttpService")
 local releaseInfo = HttpService:JSONDecode(game:HttpGetAsync("https://api.github.com/repos/" .. user .. "/Hydroxide/releases"))[1]
+-- Include published_at so replacing a tag/release busts the local module cache.
+local releaseVersion = tostring(releaseInfo.tag_name) .. ":" .. tostring(releaseInfo.published_at or releaseInfo.id or "")
 
-if readFile and writeFile then
-    local hasFolderFunctions = (isFolder and makeFolder) ~= nil
-    local ran, result = pcall(readFile, "__oh_version.txt")
+local hasFolderFunctions = (isFolder and makeFolder) ~= nil
+local hasFileFunctions = (readFile and writeFile) ~= nil
 
-    if not ran or releaseInfo.tag_name ~= result then
-        if hasFolderFunctions then
-            local function createFolder(path)
-                if not isFolder(path) then
-                    makeFolder(path)
-                end
-            end
+local function createFolder(path)
+    if hasFolderFunctions and not isFolder(path) then
+        makeFolder(path)
+    end
+end
 
-            createFolder("hydroxide")
-            createFolder("hydroxide/user")
-            createFolder("hydroxide/user/" .. user)
-            createFolder("hydroxide/user/" .. user .. "/methods")
-            createFolder("hydroxide/user/" .. user .. "/modules")
-            createFolder("hydroxide/user/" .. user .. "/objects")
-            createFolder("hydroxide/user/" .. user .. "/ui")
-            createFolder("hydroxide/user/" .. user .. "/ui/controls")
-            createFolder("hydroxide/user/" .. user .. "/ui/modules")
-        end
-
-        function environment.import(asset)
-            if importCache[asset] then
-                return unpack(importCache[asset])
-            end
-
-            local assets
-
-            if asset:find("rbxassetid://") then
-                assets = { game:GetObjects(asset)[1] }
-            elseif web then
-                if readFile and writeFile then
-                    local file = (hasFolderFunctions and "hydroxide/user/" .. user .. '/' .. asset .. ".lua") or ("hydroxide-" .. user .. '-' .. asset:gsub('/', '-') .. ".lua")
-                    local content
-
-                    if (isFile and not isFile(file)) or not importCache[asset] then
-                        content = game:HttpGetAsync("https://raw.githubusercontent.com/" .. user .. "/Hydroxide/" .. branch .. '/' .. asset .. ".lua")
-                        writeFile(file, content)
-                    else
-                        local ran, result = pcall(readFile, file)
-
-                        if (not ran) or not importCache[asset] then
-                            content = game:HttpGetAsync("https://raw.githubusercontent.com/" .. user .. "/Hydroxide/" .. branch .. '/' .. asset .. ".lua")
-                            writeFile(file, content)
-                        else
-                            content = result
-                        end
-                    end
-
-                    assets = { loadstring(content, asset .. '.lua')() }
-                else
-                    assets = { loadstring(game:HttpGetAsync("https://raw.githubusercontent.com/" .. user .. "/Hydroxide/" .. branch .. '/' .. asset .. ".lua"), asset .. '.lua')() }
-                end
-            else
-                assets = { loadstring(readFile("hydroxide/" .. asset .. ".lua"), asset .. '.lua')() }
-            end
-
-            importCache[asset] = assets
-            return unpack(assets)
-        end
-
-        writeFile("__oh_version.txt", releaseInfo.tag_name)
-    elseif ran and releaseInfo.tag_name == result then
-        function environment.import(asset)
-            if importCache[asset] then
-                return unpack(importCache[asset])
-            end
-
-            if asset:find("rbxassetid://") then
-                assets = { game:GetObjects(asset)[1] }
-            elseif web then
-                local file = (hasFolderFunctions and "hydroxide/user/" .. user .. '/' .. asset .. ".lua") or ("hydroxide-" .. user .. '-' .. asset:gsub('/', '-') .. ".lua")
-                local ran, result = pcall(readFile, file)
-                local content
-
-                if not ran then
-                    content = game:HttpGetAsync("https://raw.githubusercontent.com/" .. user .. "/Hydroxide/" .. branch .. '/' .. asset .. ".lua")
-                    writeFile(file, content)
-                else
-                    content = result
-                end
-
-                assets = { loadstring(content, asset .. '.lua')() }
-            else
-                assets = { loadstring(readFile("hydroxide/" .. asset .. ".lua"), asset .. '.lua')() }
-            end
-
-            importCache[asset] = assets
-            return unpack(assets)
-        end
-
+local function ensureCacheFolders()
+    if not hasFolderFunctions then
+        return
     end
 
-    useMethods({ import = environment.import })
+    createFolder("hydroxide")
+    createFolder("hydroxide/user")
+    createFolder("hydroxide/user/" .. user)
+    createFolder("hydroxide/user/" .. user .. "/methods")
+    createFolder("hydroxide/user/" .. user .. "/modules")
+    createFolder("hydroxide/user/" .. user .. "/objects")
+    createFolder("hydroxide/user/" .. user .. "/ui")
+    createFolder("hydroxide/user/" .. user .. "/ui/controls")
+    createFolder("hydroxide/user/" .. user .. "/ui/modules")
 end
+
+local function cachePath(asset)
+    if hasFolderFunctions then
+        return "hydroxide/user/" .. user .. "/" .. asset .. ".lua"
+    end
+
+    return "hydroxide-" .. user .. "-" .. asset:gsub("/", "-") .. ".lua"
+end
+
+local function isValidSource(content)
+    return type(content) == "string" and #content > 0
+end
+
+local function fetchRemoteSource(asset)
+    local url = ("https://raw.githubusercontent.com/%s/Hydroxide/%s/%s.lua"):format(user, branch, asset)
+    local ok, content = pcall(game.HttpGetAsync, game, url)
+
+    if ok and isValidSource(content) then
+        return content
+    end
+
+    error(("<OH> Failed to fetch '%s' from %s (%s)"):format(asset, url, tostring(content)), 0)
+end
+
+local function readCachedSource(path)
+    if not hasFileFunctions then
+        return nil
+    end
+
+    if isFile and not isFile(path) then
+        return nil
+    end
+
+    local ok, content = pcall(readFile, path)
+    if ok and isValidSource(content) then
+        return content
+    end
+
+    return nil
+end
+
+local function writeCachedSource(path, content)
+    if hasFileFunctions and isValidSource(content) then
+        pcall(writeFile, path, content)
+    end
+end
+
+local cachedVersion = hasFileFunctions and select(2, pcall(readFile, "__oh_version.txt")) or nil
+local useDiskCache = hasFileFunctions and cachedVersion == releaseVersion
+
+if hasFileFunctions and not useDiskCache then
+    ensureCacheFolders()
+    pcall(writeFile, "__oh_version.txt", releaseVersion)
+end
+
+function environment.import(asset)
+    if importCache[asset] then
+        return unpack(importCache[asset])
+    end
+
+    local assets
+
+    if asset:find("rbxassetid://") then
+        assets = { game:GetObjects(asset)[1] }
+    elseif web then
+        local content
+
+        if useDiskCache then
+            content = readCachedSource(cachePath(asset))
+        end
+
+        if not isValidSource(content) then
+            content = fetchRemoteSource(asset)
+            writeCachedSource(cachePath(asset), content)
+        end
+
+        local compiled, result = loadstring(content, asset .. ".lua")
+        if not compiled then
+            error(("<OH> Failed to compile '%s': %s"):format(asset, tostring(result)), 0)
+        end
+
+        assets = { compiled() }
+    else
+        local content = readFile("hydroxide/" .. asset .. ".lua")
+        assert(isValidSource(content), "<OH> Local file missing or empty: hydroxide/" .. asset .. ".lua")
+        assets = { loadstring(content, asset .. ".lua")() }
+    end
+
+    importCache[asset] = assets
+    return unpack(assets)
+end
+
+useMethods({ import = environment.import })
 
 useMethods(import("methods/string"))
 useMethods(import("methods/table"))
